@@ -15,14 +15,18 @@ from torch.utils.data import DistributedSampler
 from torchdyn.core import NeuralODE
 from torchvision import datasets, transforms
 from tqdm import trange
-from utils_cifar import ema, generate_samples, infiniteloop, setup
+from utils_cifar import setup, ema, generate_samples, infiniteloop, generate_samples_slow, generate_samples_vp_fast, generate_samples_ot_fast
 
 from torchcfm.conditional_flow_matching import (
     ConditionalFlowMatcher,
     ExactOptimalTransportConditionalFlowMatcher,
     TargetConditionalFlowMatcher,
     VariancePreservingConditionalFlowMatcher,
+    SlowOptimalTransportConditionalFlowMatcher,
+    FastVariancePreservingConditionalFlowMatcher,
 )
+
+
 from torchcfm.models.unet.unet import UNetModelWrapper
 
 FLAGS = flags.FLAGS
@@ -46,7 +50,7 @@ flags.DEFINE_bool("parallel", False, help="multi gpu training")
 flags.DEFINE_string(
     "master_addr", "localhost", help="master address for Distributed Data Parallel"
 )
-flags.DEFINE_string("master_port", "12355", help="master port for Distributed Data Parallel")
+flags.DEFINE_string("master_port", "13567", help="master port for Distributed Data Parallel")
 
 # Evaluation
 flags.DEFINE_integer(
@@ -109,7 +113,8 @@ def train(rank, total_num_gpus, argv):
     # MODELS
     net_model = UNetModelWrapper(
         dim=(3, 32, 32),
-        num_res_blocks=2,
+        num_res_blocks=8,
+        out_channels=6,
         num_channels=FLAGS.num_channel,
         channel_mult=[1, 2, 2, 2],
         num_heads=4,
@@ -146,6 +151,10 @@ def train(rank, total_num_gpus, argv):
         FM = TargetConditionalFlowMatcher(sigma=sigma)
     elif FLAGS.model == "si":
         FM = VariancePreservingConditionalFlowMatcher(sigma=sigma)
+    elif FLAGS.model == "otcfm_slow":
+        FM = SlowOptimalTransportConditionalFlowMatcher(sigma=sigma)
+    elif FLAGS.model == "vp_fast":
+        FM = FastVariancePreservingConditionalFlowMatcher(sigma=sigma)
     else:
         raise NotImplementedError(
             f"Unknown model {FLAGS.model}, must be one of ['otcfm', 'icfm', 'fm', 'si']"
@@ -155,7 +164,7 @@ def train(rank, total_num_gpus, argv):
     os.makedirs(savedir, exist_ok=True)
 
     global_step = 0  # to keep track of the global step in training loop
-
+    print("Starting training...")
     with trange(num_epochs, dynamic_ncols=True) as epoch_pbar:
         for epoch in epoch_pbar:
             epoch_pbar.set_description(f"Epoch {epoch + 1}/{num_epochs}")
@@ -180,12 +189,20 @@ def train(rank, total_num_gpus, argv):
 
                     # sample and Saving the weights
                     if FLAGS.save_step > 0 and global_step % FLAGS.save_step == 0:
-                        generate_samples(
-                            net_model, FLAGS.parallel, savedir, global_step, net_="normal"
-                        )
-                        generate_samples(
-                            ema_model, FLAGS.parallel, savedir, global_step, net_="ema"
-                        )
+                        if FLAGS.model == "otcfm":
+                            generate_samples_ot_fast(net_model, FLAGS.parallel, savedir, global_step, net_="normal")
+                            generate_samples_ot_fast(ema_model, FLAGS.parallel, savedir, global_step, net_="ema")
+                        elif FLAGS.model == "otcfm_slow":
+                            generate_samples_slow(net_model, FLAGS.parallel, savedir, global_step, net_="normal")
+                            generate_samples_slow(ema_model, FLAGS.parallel, savedir, global_step, net_="ema")
+                        elif FLAGS.model == "vp_fast":
+                            generate_samples_vp_fast(net_model, FLAGS.parallel, savedir, global_step, net_="normal")
+                            generate_samples_vp_fast(ema_model, FLAGS.parallel, savedir, global_step, net_="ema")
+                        else:
+                            generate_samples(net_model, FLAGS.parallel, savedir, global_step, net_="normal")
+                            generate_samples(ema_model, FLAGS.parallel, savedir, global_step, net_="ema")
+                        # generate_samples(net_model, FLAGS.parallel, savedir, global_step, net_="normal")
+                        # generate_samples(ema_model, FLAGS.parallel, savedir, global_step, net_="ema")
                         torch.save(
                             {
                                 "net_model": net_model.state_dict(),

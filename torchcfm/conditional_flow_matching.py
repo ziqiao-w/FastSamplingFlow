@@ -216,7 +216,152 @@ class ConditionalFlowMatcher:
         return 2 * sigma_t / (self.sigma**2 + 1e-8)
 
 
+# class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
+#     """Child class for optimal transport conditional flow matching method. This class implements
+#     the OT-CFM methods from [1] and inherits the ConditionalFlowMatcher parent class.
+
+#     It overrides the sample_location_and_conditional_flow.
+#     """
+
+#     def __init__(self, sigma: Union[float, int] = 0.0):
+#         r"""Initialize the ConditionalFlowMatcher class. It requires the hyper-parameter $\sigma$.
+
+#         Parameters
+#         ----------
+#         sigma : Union[float, int]
+#         ot_sampler: exact OT method to draw couplings (x0, x1) (see Eq.(17) [1]).
+#         """
+#         super().__init__(sigma)
+#         self.ot_sampler = OTPlanSampler(method="exact")
+
+#     def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
+#         r"""
+#         Compute the sample xt (drawn from N(t * x1 + (1 - t) * x0, sigma))
+#         and the conditional vector field ut(x1|x0) = x1 - x0, see Eq.(15) [1]
+#         with respect to the minibatch OT plan $\Pi$.
+
+#         Parameters
+#         ----------
+#         x0 : Tensor, shape (bs, *dim)
+#             represents the source minibatch
+#         x1 : Tensor, shape (bs, *dim)
+#             represents the target minibatch
+#         (optionally) t : Tensor, shape (bs)
+#             represents the time levels
+#             if None, drawn from uniform [0,1]
+#         return_noise : bool
+#             return the noise sample epsilon
+
+#         Returns
+#         -------
+#         t : FloatTensor, shape (bs)
+#         xt : Tensor, shape (bs, *dim)
+#             represents the samples drawn from probability path pt
+#         ut : conditional vector field ut(x1|x0) = x1 - x0
+#         (optionally) epsilon : Tensor, shape (bs, *dim) such that xt = mu_t + sigma_t * epsilon
+
+#         References
+#         ----------
+#         [1] Improving and Generalizing Flow-Based Generative Models with minibatch optimal transport, Preprint, Tong et al.
+#         """
+#         x0, x1 = self.ot_sampler.sample_plan(x0, x1)
+#         return super().sample_location_and_conditional_flow(x0, x1, t, return_noise)
+
+#     def guided_sample_location_and_conditional_flow(
+#         self, x0, x1, y0=None, y1=None, t=None, return_noise=False
+#     ):
+#         r"""
+#         Compute the sample xt (drawn from N(t * x1 + (1 - t) * x0, sigma))
+#         and the conditional vector field ut(x1|x0) = x1 - x0, see Eq.(15) [1]
+#         with respect to the minibatch OT plan $\Pi$.
+
+#         Parameters
+#         ----------
+#         x0 : Tensor, shape (bs, *dim)
+#             represents the source minibatch
+#         x1 : Tensor, shape (bs, *dim)
+#             represents the target minibatch
+#         y0 : Tensor, shape (bs) (default: None)
+#             represents the source label minibatch
+#         y1 : Tensor, shape (bs) (default: None)
+#             represents the target label minibatch
+#         (optionally) t : Tensor, shape (bs)
+#             represents the time levels
+#             if None, drawn from uniform [0,1]
+#         return_noise : bool
+#             return the noise sample epsilon
+
+#         Returns
+#         -------
+#         t : FloatTensor, shape (bs)
+#         xt : Tensor, shape (bs, *dim)
+#             represents the samples drawn from probability path pt
+#         ut : conditional vector field ut(x1|x0) = x1 - x0
+#         (optionally) epsilon : Tensor, shape (bs, *dim) such that xt = mu_t + sigma_t * epsilon
+
+#         References
+#         ----------
+#         [1] Improving and Generalizing Flow-Based Generative Models with minibatch optimal transport, Preprint, Tong et al.
+#         """
+#         x0, x1, y0, y1 = self.ot_sampler.sample_plan_with_labels(x0, x1, y0, y1)
+#         if return_noise:
+#             t, xt, ut, eps = super().sample_location_and_conditional_flow(x0, x1, t, return_noise)
+#             return t, xt, ut, y0, y1, eps
+#         else:
+#             t, xt, ut = super().sample_location_and_conditional_flow(x0, x1, t, return_noise)
+#             return t, xt, ut, y0, y1
+
 class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
+    """Child class for optimal transport conditional flow matching method. This class implements
+    the OT-CFM methods from [1] and inherits the ConditionalFlowMatcher parent class.
+
+    It overrides the sample_location_and_conditional_flow.
+    """
+    # steps means NFEs here
+    # no exact OT method
+    # 100 steps 4.82 // 20 steps 8.49 // dopri5 3.81 // 10 steps 14.32
+    # solver1 // 20 steps 6.88 // 10 steps 16.13 // 12 12.51 // 18 steps 7.71 // 50 steps 4.28
+    # solver2 # 20 steps 4.45 (sin 4.65)  # 10 steps 8.45 #12 steps 5.20 #18 steps 4.50  #100 steps 3.541
+    
+
+
+    # with exact OT method
+    # solver1 # 20 steps 6.27 (clipped 6.20) # 10 steps 11.50 (clipped 11.72) #12 9.54
+    # solver2 # 20 steps 4.35 (clipped 4.38) # 10 steps 6.63  #12 steps 4.63  #18 steps  4.40 # 6 steps 14.56 #100 steps 3.88
+    # new solver2 #50 steps 3.86 # 20 steps 4.38 (lmd 4.05)(without clip 4.37) (lmd  noclip 4.04)# 10 steps (lmd  noclip 5.53) # 5 steps 14.24
+
+
+    # big model # 10 steps 4.67 # 12 steps 4.06
+    def __init__(self, sigma: Union[float, int] = 0.0):
+        
+        super().__init__(sigma)
+        self.ot_sampler = OTPlanSampler(method="exact")
+        
+    # def sample_xt(self, x0, x1, t, eps):
+    #     t = pad_t_like_x(t, x0)
+    #     return (0.9998*t + 0.0001)*x1 + (1 - 0.9998*t - 0.0001)*x0
+        
+    def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
+        
+        x0, x1 = self.ot_sampler.sample_plan(x0, x1)
+        if t is None:
+            t = torch.rand(x0.shape[0]).type_as(x0)
+        assert len(t) == x0.shape[0], "t has to have batch size dimension"
+
+        eps = self.sample_noise_like(x0)
+        xt = self.sample_xt(x0, x1, t, eps)
+        ut = torch.cat([x0, x1], dim=1)
+        if return_noise:
+            return t, xt, ut, eps
+        else:
+            return t, xt, ut
+
+
+
+
+
+class SlowOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
+    #4.21 by dopri5
     """Child class for optimal transport conditional flow matching method. This class implements
     the OT-CFM methods from [1] and inherits the ConditionalFlowMatcher parent class.
 
@@ -232,7 +377,59 @@ class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
         ot_sampler: exact OT method to draw couplings (x0, x1) (see Eq.(17) [1]).
         """
         super().__init__(sigma)
-        self.ot_sampler = OTPlanSampler(method="exact")
+        # self.ot_sampler = OTPlanSampler(method="exact")
+
+
+    def sample_xt(self, x0, x1, t, epsilon):
+        """
+        Draw a sample from the probability path N(t * x1 + (1 - t) * x0, sigma), see (Eq.14) [1].
+
+        Parameters
+        ----------
+        x0 : Tensor, shape (bs, *dim)
+            represents the source minibatch
+        x1 : Tensor, shape (bs, *dim)
+            represents the target minibatch
+        t : FloatTensor, shape (bs)
+        epsilon : Tensor, shape (bs, *dim)
+            noise sample from N(0, 1)
+
+        Returns
+        -------
+        xt : Tensor, shape (bs, *dim)
+
+        References
+        ----------
+        [1] Improving and Generalizing Flow-Based Generative Models with minibatch optimal transport, Preprint, Tong et al.
+        """
+        t = pad_t_like_x(t, x1)
+        x_t = x1 * (2 * t - t * t) + (1 - t) * (1 - t) * x0
+        return x_t + self.sigma * epsilon
+
+    def compute_conditional_flow(self, x0, x1, t, xt):
+        """
+        Compute the conditional vector field ut(x1|x0) = x1 - x0, see Eq.(15) [1].
+
+        Parameters
+        ----------
+        x0 : Tensor, shape (bs, *dim)
+            represents the source minibatch
+        x1 : Tensor, shape (bs, *dim)
+            represents the target minibatch
+        t : FloatTensor, shape (bs)
+        xt : Tensor, shape (bs, *dim)
+            represents the samples drawn from probability path pt
+
+        Returns
+        -------
+        ut : conditional vector field ut(x1|x0) = x1 - x0
+
+        References
+        ----------
+        [1] Improving and Generalizing Flow-Based Generative Models with minibatch optimal transport, Preprint, Tong et al.
+        """
+        # actually 2 * (1 - t) * (x1 - x0)
+        return x1 - x0
 
     def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
         r"""
@@ -264,8 +461,17 @@ class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
         ----------
         [1] Improving and Generalizing Flow-Based Generative Models with minibatch optimal transport, Preprint, Tong et al.
         """
-        x0, x1 = self.ot_sampler.sample_plan(x0, x1)
-        return super().sample_location_and_conditional_flow(x0, x1, t, return_noise)
+        if t is None:
+            t = torch.rand(x0.shape[0]).type_as(x0)
+        assert len(t) == x0.shape[0], "t has to have batch size dimension"
+        
+        eps = self.sample_noise_like(x0)
+        xt = self.sample_xt(x0, x1, t, eps)
+        ut = self.compute_conditional_flow(x0, x1, t, xt)
+        if return_noise:
+            return t, xt, ut, eps
+        else:
+            return t, xt, ut
 
     def guided_sample_location_and_conditional_flow(
         self, x0, x1, y0=None, y1=None, t=None, return_noise=False
@@ -310,6 +516,9 @@ class ExactOptimalTransportConditionalFlowMatcher(ConditionalFlowMatcher):
         else:
             t, xt, ut = super().sample_location_and_conditional_flow(x0, x1, t, return_noise)
             return t, xt, ut, y0, y1
+
+
+
 
 
 class TargetConditionalFlowMatcher(ConditionalFlowMatcher):
@@ -605,3 +814,36 @@ class VariancePreservingConditionalFlowMatcher(ConditionalFlowMatcher):
         del xt
         t = pad_t_like_x(t, x0)
         return math.pi / 2 * (torch.cos(math.pi / 2 * t) * x1 - torch.sin(math.pi / 2 * t) * x0)
+
+class FastVariancePreservingConditionalFlowMatcher(ConditionalFlowMatcher):
+
+    # euler 100 steps fid 4.51///50 steps fid 4.37///20 steps fid 5.69///10 steps fid 22.9 /// 1000 steps fid 3.92
+    # dopri5 3.86
+    # solver 1 /// 20 steps fid 7.62
+    # solver 2 /// 20 steps fid 4.82
+    def sample_xt(self, x0, x1, t, eps):
+        # s = 0.008
+        t = pad_t_like_x(t, x0)
+        return torch.cos(math.pi / 2 * t) * x0 + torch.sin(math.pi / 2 * t) * x1
+
+    def compute_conditional_flow(self, x0, x1, t, xt):
+        # del xts
+        # t = pad_t_like_x(t, x0)
+        # return math.pi / 2 * (torch.cos(math.pi / 2 * t) * x1 - torch.sin(math.pi / 2 * t) * x0)
+        # torch.cos(math.pi / 2 * (t/(1+s)))
+        # try to learn E[x1|x_t] here
+        return torch.cat([x0, x1], dim=1)
+
+    def sample_location_and_conditional_flow(self, x0, x1, t=None, return_noise=False):
+
+        if t is None:
+            t = torch.rand(x0.shape[0]).type_as(x0)
+        assert len(t) == x0.shape[0], "t has to have batch size dimension"
+
+        eps = self.sample_noise_like(x0)
+        xt = self.sample_xt(x0, x1, t, eps)
+        ut = self.compute_conditional_flow(x0, x1, t, xt)
+        if return_noise:
+            return t, xt, ut, eps
+        else:
+            return t, xt, ut
